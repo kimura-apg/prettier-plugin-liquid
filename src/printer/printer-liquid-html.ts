@@ -179,7 +179,8 @@ function printTextNode(
     .filter(Boolean) // removes empty paragraphs (trailingWhitespace)
     .map((curr) => {
       let doc = [];
-      const words = curr.trim().split(/\s+/g);
+      // Split only on half-width whitespace to preserve full-width spaces (U+3000)
+      const words = curr.trim().split(/[ \t\r\n\f\v]+/g);
       let isFirst = true;
       for (let j = 0; j < words.length; j++) {
         const word = words[j];

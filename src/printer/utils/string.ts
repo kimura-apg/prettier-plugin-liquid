@@ -7,7 +7,8 @@ import {
 
 export function isWhitespace(source: string, loc: number): boolean {
   if (loc < 0 || loc >= source.length) return false;
-  return !!source[loc].match(/\s/);
+  // Only match half-width whitespace to preserve full-width spaces (U+3000)
+  return !!source[loc].match(/[ \t\r\n\f\v]/);
 }
 
 export const trim = (x: string) => x.trim();
@@ -15,7 +16,7 @@ export const trimEnd = (x: string) => x.trimEnd();
 
 export function bodyLines(str: string): string[] {
   return str
-    .replace(/^(?: |\t)*(\r?\n)*|\s*$/g, '') // only want the meat
+    .replace(/^(?: |\t)*(\r?\n)*|[ \t\r\n\f\v]*$/g, '') // only want the meat, preserve full-width spaces
     .split(/\r?\n/);
 }
 
