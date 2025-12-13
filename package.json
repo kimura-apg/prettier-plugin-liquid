@@ -1,13 +1,13 @@
 {
-  "name": "@shopify/prettier-plugin-liquid",
+  "name": "@isomaguro_taisa/prettier-plugin-liquid",
   "version": "1.2.2",
   "description": "Prettier Liquid/HTML plugin by Shopify",
-  "repository": "shopify/prettier-plugin-liquid",
+  "repository": "kimura-apg/prettier-plugin-liquid",
   "author": "CP Clermont <@charlespwd>",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "homepage": "https://github.com/shopify/prettier-plugin-liquid#readme",
+  "homepage": "https://github.com/kimura-apg/prettier-plugin-liquid#readme",
   "publishConfig": {
     "access": "public",
     "@shopify:registry": "https://registry.npmjs.org"
