@@ -1,7 +1,7 @@
 {
   "name": "@isomaguro_taisa/prettier-plugin-liquid",
-  "version": "1.2.2",
-  "description": "Prettier Liquid/HTML plugin by Shopify",
+  "version": "1.2.3",
+  "description": "Prettier Liquid/HTML plugin by Shopify (with full-width space support)",
   "repository": "kimura-apg/prettier-plugin-liquid",
   "author": "CP Clermont <@charlespwd>",
   "license": "MIT",
@@ -9,11 +9,10 @@
   "types": "dist/index.d.ts",
   "homepage": "https://github.com/kimura-apg/prettier-plugin-liquid#readme",
   "publishConfig": {
-    "access": "public",
-    "@shopify:registry": "https://registry.npmjs.org"
+    "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/shopify/prettier-plugin-liquid/issues"
+    "url": "https://github.com/kimura-apg/prettier-plugin-liquid/issues"
   },
   "files": [
     "grammar/*",
