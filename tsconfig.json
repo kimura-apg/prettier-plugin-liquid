@@ -1,29 +1,28 @@
 {
   "compilerOptions": {
     "lib": ["es2020"],
-    "noImplicitAny": true,
-    "removeComments": true,
-    "declaration": true,
-    "preserveConstEnums": true,
-    "outDir": "dist",
-    "emitDecoratorMetadata": true,
+    "target": "ES2020",
     "module": "commonjs",
-    "diagnostics": false,
+    "moduleResolution": "node",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": true,
+    "declaration": true,
+    "esModuleInterop": true,
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "inlineSourceMap": true,
-    "target": "ES2020",
-    "moduleResolution": "node",
-    "esModuleInterop": true,
+    "sourceMap": false,
     "allowJs": true,
-    "jsx": "react",
-    "experimentalDecorators": true,
-    "allowUnusedLabels": true,
+    "types": ["vitest/globals", "node"],
     "baseUrl": ".",
     "paths": {
       "~/*": ["src/*"]
     },
-    "types": ["vitest/globals", "node"]
+    "resolveJsonModule": true,
+    "preserveConstEnums": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]
