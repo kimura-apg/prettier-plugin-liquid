@@ -1,6 +1,6 @@
 {
   "name": "@isomaguro_taisa/prettier-plugin-liquid",
-  "version": "1.10.0-fullwidth.0",
+  "version": "1.10.0-fullwidth.1",
   "description": "Prettier Liquid/HTML plugin by Shopify v1.10.0 (with full-width space support)",
   "repository": {
     "type": "git",
