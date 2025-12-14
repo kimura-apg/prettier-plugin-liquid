@@ -1,22 +1,19 @@
+import { NodeTypes, LiquidNodeTypes, HtmlNodeTypes, Position } from '@shopify/liquid-html-parser';
 import {
   HtmlSelfClosingElement,
   LiquidHtmlNode,
-  NodeTypes,
   TextNode,
   LiquidNode,
-  LiquidNodeTypes,
-  HtmlNodeTypes,
   HtmlNode,
   HtmlVoidElement,
   HtmlComment,
   HtmlElement,
   LiquidTag,
   AttributeNode,
-  LiquidDrop,
-  HtmlDanglingMarkerOpen,
+  LiquidVariableOutput,
   HtmlDanglingMarkerClose,
-} from '~/types';
-import { isEmpty } from '~/printer/utils/array';
+} from '../../types';
+import { isEmpty } from './array';
 
 export function isScriptLikeTag(node: { type: NodeTypes }) {
   return node.type === NodeTypes.HtmlRawNode;
@@ -34,26 +31,31 @@ export function hasNoCloseMarker(
   | HtmlComment
   | HtmlVoidElement
   | HtmlSelfClosingElement
-  | HtmlDanglingMarkerOpen
-  | HtmlDanglingMarkerClose {
+  | HtmlDanglingMarkerClose
+  | HtmlElement {
+  return hasNoChildren(node) || isHtmlDanglingMarkerOpen(node);
+}
+
+export function hasNoChildren(
+  node: LiquidHtmlNode,
+): node is HtmlComment | HtmlVoidElement | HtmlSelfClosingElement | HtmlDanglingMarkerClose {
   return (
     isSelfClosing(node) ||
     isVoidElement(node) ||
     isHtmlComment(node) ||
-    isHtmlDanglingMarkerOpen(node) ||
     isHtmlDanglingMarkerClose(node)
   );
 }
 
 export function isHtmlDanglingMarkerOpen(
   node: LiquidHtmlNode,
-): node is HtmlDanglingMarkerOpen {
-  return node.type === NodeTypes.HtmlDanglingMarkerOpen;
+): node is Omit<HtmlElement, 'blockEndPosition'> & { blockEndPosition: Position } {
+  return (
+    node.type === NodeTypes.HtmlElement && node.blockEndPosition.start === node.blockEndPosition.end
+  );
 }
 
-export function isHtmlDanglingMarkerClose(
-  node: LiquidHtmlNode,
-): node is HtmlDanglingMarkerClose {
+export function isHtmlDanglingMarkerClose(node: LiquidHtmlNode): node is HtmlDanglingMarkerClose {
   return node.type === NodeTypes.HtmlDanglingMarkerClose;
 }
 
@@ -61,9 +63,7 @@ export function isHtmlComment(node: LiquidHtmlNode): node is HtmlComment {
   return node.type === NodeTypes.HtmlComment;
 }
 
-export function isSelfClosing(
-  node: LiquidHtmlNode,
-): node is HtmlSelfClosingElement {
+export function isSelfClosing(node: LiquidHtmlNode): node is HtmlSelfClosingElement {
   return node.type === NodeTypes.HtmlSelfClosingElement;
 }
 
@@ -75,27 +75,16 @@ export function isHtmlElement(node: LiquidHtmlNode): node is HtmlElement {
   return node.type === NodeTypes.HtmlElement;
 }
 
-export function isTextLikeNode(
-  node: LiquidHtmlNode | undefined,
-): node is TextNode {
+export function isTextLikeNode(node: LiquidHtmlNode | undefined): node is TextNode {
   return !!node && node.type === NodeTypes.TextNode;
 }
 
-export function isLiquidNode(
-  node: LiquidHtmlNode | undefined,
-): node is LiquidNode {
+export function isLiquidNode(node: LiquidHtmlNode | undefined): node is LiquidNode {
   return !!node && LiquidNodeTypes.includes(node.type as any);
 }
 
-export function isMultilineLiquidTag(
-  node: LiquidHtmlNode | undefined,
-): node is LiquidTag {
-  return (
-    !!node &&
-    node.type === NodeTypes.LiquidTag &&
-    !!node.children &&
-    !isEmpty(node.children)
-  );
+export function isMultilineLiquidTag(node: LiquidHtmlNode | undefined): node is LiquidTag {
+  return !!node && node.type === NodeTypes.LiquidTag && !!node.children && !isEmpty(node.children);
 }
 
 export function isHtmlNode(node: LiquidHtmlNode | undefined): node is HtmlNode {
@@ -115,9 +104,7 @@ export function isAttributeNode(
 export function hasNonTextChild(node: LiquidHtmlNode) {
   return (
     (node as any).children &&
-    (node as any).children.some(
-      (child: LiquidHtmlNode) => child.type !== NodeTypes.TextNode,
-    )
+    (node as any).children.some((child: LiquidHtmlNode) => child.type !== NodeTypes.TextNode)
   );
 }
 
@@ -147,19 +134,13 @@ export function shouldPreserveContent(node: LiquidHtmlNode) {
   return false;
 }
 
-export function isPrettierIgnoreHtmlNode(
-  node: LiquidHtmlNode | undefined,
-): node is HtmlComment {
+export function isPrettierIgnoreHtmlNode(node: LiquidHtmlNode | undefined): node is HtmlComment {
   return (
-    !!node &&
-    node.type === NodeTypes.HtmlComment &&
-    /^\s*prettier-ignore(?=\s|$)/m.test(node.body)
+    !!node && node.type === NodeTypes.HtmlComment && /^\s*prettier-ignore(?=\s|$)/m.test(node.body)
   );
 }
 
-export function isPrettierIgnoreLiquidNode(
-  node: LiquidHtmlNode | undefined,
-): node is LiquidTag {
+export function isPrettierIgnoreLiquidNode(node: LiquidHtmlNode | undefined): node is LiquidTag {
   return (
     !!node &&
     node.type === NodeTypes.LiquidTag &&
@@ -179,9 +160,7 @@ export function hasPrettierIgnore(node: LiquidHtmlNode) {
 }
 
 function getPrettierIgnoreAttributeCommentData(value: string): boolean {
-  const match = value
-    .trim()
-    .match(/prettier-ignore-attribute(?:s?)(?:\s+(.+))?$/s);
+  const match = value.trim().match(/prettier-ignore-attribute(?:s?)(?:\s+(.+))?$/s);
 
   if (!match) {
     return false;
@@ -205,9 +184,7 @@ function getPrettierIgnoreAttributeCommentData(value: string): boolean {
   return true;
 }
 
-export function isPrettierIgnoreAttributeNode(
-  node: LiquidHtmlNode | undefined,
-): boolean {
+export function isPrettierIgnoreAttributeNode(node: LiquidHtmlNode | undefined): boolean {
   if (!node) return false;
   if (node.type === NodeTypes.HtmlComment) {
     return getPrettierIgnoreAttributeCommentData(node.body);
@@ -246,8 +223,7 @@ export function forceBreakContent(node: LiquidHtmlNode) {
       node.firstChild === node.lastChild &&
       node.firstChild.type !== NodeTypes.TextNode &&
       hasLeadingLineBreak(node.firstChild) &&
-      (!node.lastChild.isTrailingWhitespaceSensitive ||
-        hasTrailingLineBreak(node.lastChild)))
+      (!node.lastChild.isTrailingWhitespaceSensitive || hasTrailingLineBreak(node.lastChild)))
   );
 }
 
@@ -269,10 +245,7 @@ export function preferHardlineAsSurroundingSpaces(node: LiquidHtmlNode) {
     case NodeTypes.HtmlElement:
       return isTagNameIncluded(['script', 'select'], node.name);
     case NodeTypes.LiquidTag:
-      if (
-        (node.prev && isTextLikeNode(node.prev)) ||
-        (node.next && isTextLikeNode(node.next))
-      ) {
+      if ((node.prev && isTextLikeNode(node.prev)) || (node.next && isTextLikeNode(node.next))) {
         return false;
       }
       return node.children && node.children.length > 0;
@@ -293,30 +266,21 @@ export function preferHardlineAsLeadingSpaces(node: LiquidHtmlNode) {
 export function preferHardlineAsTrailingSpaces(node: LiquidHtmlNode) {
   return (
     preferHardlineAsSurroundingSpaces(node) ||
-    (isLiquidNode(node) &&
-      node.next &&
-      (isLiquidNode(node.next) || isHtmlNode(node.next))) ||
-    (node.type === NodeTypes.HtmlElement &&
-      isTagNameIncluded(['br'], node.name)) ||
+    (isLiquidNode(node) && node.next && (isLiquidNode(node.next) || isHtmlNode(node.next))) ||
+    (node.type === NodeTypes.HtmlElement && isTagNameIncluded(['br'], node.name)) ||
     hasSurroundingLineBreak(node)
   );
 }
 
-export function hasMeaningfulLackOfLeadingWhitespace(
-  node: LiquidHtmlNode,
-): boolean {
+export function hasMeaningfulLackOfLeadingWhitespace(node: LiquidHtmlNode): boolean {
   return node.isLeadingWhitespaceSensitive && !node.hasLeadingWhitespace;
 }
 
-export function hasMeaningfulLackOfTrailingWhitespace(
-  node: LiquidHtmlNode,
-): boolean {
+export function hasMeaningfulLackOfTrailingWhitespace(node: LiquidHtmlNode): boolean {
   return node.isTrailingWhitespaceSensitive && !node.hasTrailingWhitespace;
 }
 
-export function hasMeaningfulLackOfDanglingWhitespace(
-  node: LiquidHtmlNode,
-): boolean {
+export function hasMeaningfulLackOfDanglingWhitespace(node: LiquidHtmlNode): boolean {
   return node.isDanglingWhitespaceSensitive && !node.hasDanglingWhitespace;
 }
 
@@ -368,7 +332,7 @@ export function getLastDescendant(node: LiquidHtmlNode): LiquidHtmlNode {
 
 function isTagNameIncluded(
   collection: string[],
-  name: (TextNode | LiquidDrop)[],
+  name: (TextNode | LiquidVariableOutput)[],
 ): boolean {
   if (name.length !== 1 || name[0].type !== NodeTypes.TextNode) return false;
   return collection.includes(name[0].value);

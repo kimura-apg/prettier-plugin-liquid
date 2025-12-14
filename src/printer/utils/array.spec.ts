@@ -1,5 +1,5 @@
-import { expect } from 'chai';
-import * as array from '~/printer/utils/array';
+import { expect, it, describe } from 'vitest';
+import * as array from './array';
 
 describe('Module: array', () => {
   describe('Unit: first', () => {

@@ -1,7 +1,30 @@
+import { NodeTypes, Position } from '@shopify/liquid-html-parser';
 import { Doc, doc } from 'prettier';
+
+import {
+  first,
+  getLastDescendant,
+  hasMeaningfulLackOfLeadingWhitespace,
+  hasMeaningfulLackOfTrailingWhitespace,
+  hasMoreThanOneNewLineBetweenNodes,
+  hasNoChildren,
+  hasNoCloseMarker,
+  hasPrettierIgnore,
+  isHtmlComment,
+  isHtmlDanglingMarkerOpen,
+  isHtmlElement,
+  isHtmlNode,
+  isLiquidNode,
+  isPreLikeNode,
+  isPrettierIgnoreAttributeNode,
+  isSelfClosing,
+  isTextLikeNode,
+  isVoidElement,
+  last,
+  shouldPreserveContent,
+} from '../utils';
 import {
   AstPath,
-  HtmlDanglingMarkerOpen,
   HtmlDanglingMarkerClose,
   HtmlElement,
   HtmlNode,
@@ -9,150 +32,17 @@ import {
   LiquidHtmlNode,
   LiquidParserOptions,
   LiquidPrinter,
-  NodeTypes,
-  Position,
-} from '~/types';
-import {
-  getLastDescendant,
-  hasPrettierIgnore,
-  isHtmlNode,
-  isVoidElement,
-  isHtmlElement,
-  isLiquidNode,
-  isPreLikeNode,
-  hasNoCloseMarker,
-  isTextLikeNode,
-  shouldPreserveContent,
-  isSelfClosing,
-  isHtmlComment,
-  hasMeaningfulLackOfLeadingWhitespace,
-  hasMeaningfulLackOfTrailingWhitespace,
-  last,
-  first,
-  isPrettierIgnoreAttributeNode,
-  hasMoreThanOneNewLineBetweenNodes,
-} from '~/printer/utils';
+} from '../../types';
 
 const {
   builders: { breakParent, indent, join, line, softline, hardline },
 } = doc;
 const { replaceEndOfLine } = doc.utils as any;
 
-export function printClosingTag(
-  node: LiquidHtmlNode,
-  options: LiquidParserOptions,
-) {
-  return [
-    hasNoCloseMarker(node) ? '' : printClosingTagStart(node, options),
-    printClosingTagEnd(node, options),
-  ];
-}
-
-export function printClosingTagStart(
-  node: LiquidHtmlNode,
-  options: LiquidParserOptions,
-) {
-  return node.lastChild &&
-    needsToBorrowParentClosingTagStartMarker(node.lastChild)
-    ? ''
-    : [
-        printClosingTagPrefix(node, options),
-        printClosingTagStartMarker(node, options),
-      ];
-}
-
-export function printClosingTagEnd(
-  node: LiquidHtmlNode,
-  options: LiquidParserOptions,
-) {
+function shouldNotPrintClosingTag(node: LiquidHtmlNode, _options: LiquidParserOptions) {
   return (
-    node.next
-      ? needsToBorrowPrevClosingTagEndMarker(node.next)
-      : needsToBorrowLastChildClosingTagEndMarker(node.parentNode!)
-  )
-    ? ''
-    : [
-        printClosingTagEndMarker(node, options),
-        printClosingTagSuffix(node, options),
-      ];
-}
-
-function printClosingTagPrefix(
-  node: LiquidHtmlNode,
-  options: LiquidParserOptions,
-) {
-  return needsToBorrowLastChildClosingTagEndMarker(node)
-    ? printClosingTagEndMarker(node.lastChild, options)
-    : '';
-}
-
-export function printClosingTagSuffix(
-  node: LiquidHtmlNode,
-  options: LiquidParserOptions,
-) {
-  return needsToBorrowParentClosingTagStartMarker(node)
-    ? printClosingTagStartMarker(node.parentNode, options)
-    : needsToBorrowNextOpeningTagStartMarker(node)
-    ? printOpeningTagStartMarker(node.next)
-    : '';
-}
-
-export function printClosingTagStartMarker(
-  node: LiquidHtmlNode | undefined,
-  options: LiquidParserOptions,
-) {
-  if (!node) return '';
-  /* istanbul ignore next */
-  if (shouldNotPrintClosingTag(node, options)) {
-    return '';
-  }
-  switch (node.type) {
-    case NodeTypes.HtmlElement:
-      return `</${getCompoundName(node)}`;
-    case NodeTypes.HtmlRawNode:
-      return `</${node.name}`;
-    default:
-      return '';
-  }
-}
-
-export function printClosingTagEndMarker(
-  node: LiquidHtmlNode | undefined,
-  options: LiquidParserOptions,
-) {
-  if (!node) return '';
-  if (shouldNotPrintClosingTag(node, options)) {
-    return '';
-  }
-
-  switch (node.type) {
-    // case 'ieConditionalComment':
-    // case 'ieConditionalEndComment':
-    //   return '[endif]-->';
-    // case 'ieConditionalStartComment':
-    //   return ']><!-->';
-    // case 'interpolation':
-    //   return '}}';
-    case NodeTypes.HtmlSelfClosingElement: {
-      // This looks like it doesn't make sense because it should be part of
-      // the printOpeningTagEndMarker but this is handled somewhere else.
-      // This function is used to determine what to borrow so the "end" to
-      // borrow is actually the other end.
-      return '/>';
-    }
-
-    default:
-      return '>';
-  }
-}
-
-function shouldNotPrintClosingTag(
-  node: LiquidHtmlNode,
-  _options: LiquidParserOptions,
-) {
-  return (
-    !hasNoCloseMarker(node) &&
-    !(node as any).blockEndPosition &&
+    !hasNoCloseMarker(node) && // has close marker
+    !(node as any).blockEndPosition && // does not have blockEndPosition
     (hasPrettierIgnore(node) || shouldPreserveContent(node.parentNode!))
   );
 }
@@ -176,9 +66,7 @@ export function needsToBorrowPrevClosingTagEndMarker(node: LiquidHtmlNode) {
   );
 }
 
-export function needsToBorrowLastChildClosingTagEndMarker(
-  node: LiquidHtmlNode,
-) {
+export function needsToBorrowLastChildClosingTagEndMarker(node: LiquidHtmlNode) {
   /**
    *     <p
    *       ><a></a
@@ -212,8 +100,7 @@ export function needsToBorrowParentClosingTagStartMarker(node: LiquidHtmlNode) {
     !node.next &&
     hasMeaningfulLackOfTrailingWhitespace(node) &&
     !isLiquidNode(node) &&
-    (isTextLikeNode(getLastDescendant(node)) ||
-      isLiquidNode(getLastDescendant(node)))
+    (isTextLikeNode(getLastDescendant(node)) || isLiquidNode(getLastDescendant(node)))
   );
 }
 
@@ -280,11 +167,7 @@ function printAttributes(
     let extraNewline: Doc = '';
     if (
       attrNode.prev &&
-      hasMoreThanOneNewLineBetweenNodes(
-        attrNode.source,
-        attrNode.prev,
-        attrNode,
-      )
+      hasMoreThanOneNewLineBetweenNodes(attrNode.source, attrNode.prev, attrNode)
     ) {
       extraNewline = hardline;
     }
@@ -297,9 +180,7 @@ function printAttributes(
     .includes('\n');
 
   const isSingleLineLinkTagException =
-    options.singleLineLinkTags &&
-    typeof node.name === 'string' &&
-    node.name === 'link';
+    options.singleLineLinkTags && typeof node.name === 'string' && node.name === 'link';
 
   const shouldNotBreakAttributes =
     ((isHtmlElement(node) && node.children.length > 0) ||
@@ -309,8 +190,7 @@ function printAttributes(
     node.attributes.length === 1 &&
     !isLiquidNode(node.attributes[0]);
 
-  const forceNotToBreakAttrContent =
-    isSingleLineLinkTagException || shouldNotBreakAttributes;
+  const forceNotToBreakAttrContent = isSingleLineLinkTagException || shouldNotBreakAttributes;
 
   const whitespaceBetweenAttributes = forceNotToBreakAttrContent
     ? ' '
@@ -335,16 +215,14 @@ function printAttributes(
      *           ~
      *       >456
      */
-    (node.firstChild &&
-      needsToBorrowParentOpeningTagEndMarker(node.firstChild)) ||
+    (node.firstChild && needsToBorrowParentOpeningTagEndMarker(node.firstChild)) ||
     /**
      *     <span
      *       >123<meta
      *                ~
      *     /></span>
      */
-    (hasNoCloseMarker(node) &&
-      needsToBorrowLastChildClosingTagEndMarker(node.parentNode!)) ||
+    (hasNoCloseMarker(node) && needsToBorrowLastChildClosingTagEndMarker(node.parentNode!)) ||
     forceNotToBreakAttrContent
   ) {
     trailingInnerWhitespace = isSelfClosing(node) ? ' ' : '';
@@ -368,13 +246,6 @@ function printAttributes(
   ];
 }
 
-function printOpeningTagEnd(node: LiquidHtmlNode) {
-  return node.firstChild &&
-    needsToBorrowParentOpeningTagEndMarker(node.firstChild)
-    ? ''
-    : printOpeningTagEndMarker(node);
-}
-
 export function printOpeningTag(
   path: AstPath<HtmlNode>,
   options: LiquidParserOptions,
@@ -386,31 +257,41 @@ export function printOpeningTag(
   return [
     printOpeningTagStart(node, options),
     printAttributes(path, options, print, attrGroupId),
-    hasNoCloseMarker(node) ? '' : printOpeningTagEnd(node),
+    hasNoChildren(node) ? '' : printOpeningTagEnd(node),
   ];
 }
 
-export function printOpeningTagStart(
-  node: LiquidHtmlNode,
-  options: LiquidParserOptions,
-) {
+// If the current node's `<` isn't borrowed by the previous node, will print the prefix and `<`
+export function printOpeningTagStart(node: LiquidHtmlNode, options: LiquidParserOptions) {
   return node.prev && needsToBorrowNextOpeningTagStartMarker(node.prev)
     ? ''
     : [printOpeningTagPrefix(node, options), printOpeningTagStartMarker(node)];
 }
 
-export function printOpeningTagPrefix(
-  node: LiquidHtmlNode,
-  options: LiquidParserOptions,
-) {
+// The opening tag prefix is the mechanism we use to "borrow" closing tags to maintain lack of whitespace
+// It will print the parent's or the previous node's `>` if we need to.
+export function printOpeningTagPrefix(node: LiquidHtmlNode, options: LiquidParserOptions) {
   return needsToBorrowParentOpeningTagEndMarker(node)
-    ? printOpeningTagEndMarker(node.parentNode)
+    ? printOpeningTagEndMarker(node.parentNode) // opening tag '>' of parent
     : needsToBorrowPrevClosingTagEndMarker(node)
-    ? printClosingTagEndMarker(node.prev, options)
+    ? printClosingTagEndMarker(node.prev, options) // closing '>' of previous
     : '';
 }
 
-// TODO
+// Will maybe print the `>` of the node.
+//   If the first child needs to borrow the `>`, we won't print it
+//
+//   <a
+//     ><img
+//     ^ this is the opening tag end. Might be borrowed by the first child.
+//   ></a>
+function printOpeningTagEnd(node: LiquidHtmlNode) {
+  return node.firstChild && needsToBorrowParentOpeningTagEndMarker(node.firstChild)
+    ? ''
+    : printOpeningTagEndMarker(node);
+}
+
+// Print the `<` equivalent for the node.
 export function printOpeningTagStartMarker(node: LiquidHtmlNode | undefined) {
   if (!node) return '';
   switch (node.type) {
@@ -418,7 +299,6 @@ export function printOpeningTagStartMarker(node: LiquidHtmlNode | undefined) {
       return '<!--';
     case NodeTypes.HtmlElement:
     case NodeTypes.HtmlSelfClosingElement:
-    case NodeTypes.HtmlDanglingMarkerOpen:
       return `<${getCompoundName(node)}`;
     case NodeTypes.HtmlDanglingMarkerClose:
       return `</${getCompoundName(node)}`;
@@ -430,19 +310,100 @@ export function printOpeningTagStartMarker(node: LiquidHtmlNode | undefined) {
   }
 }
 
+// this function's job is to print the closing part of the tag </a>
+// curious: it also prints void elements `>` and self closing node's `/>`
+//   that's because we might want to borrow it
+export function printClosingTag(node: LiquidHtmlNode, options: LiquidParserOptions) {
+  return [
+    hasNoCloseMarker(node) ? '' : printClosingTagStart(node, options),
+    printClosingTagEnd(node, options),
+  ];
+}
+
+export function printClosingTagStart(node: LiquidHtmlNode, options: LiquidParserOptions) {
+  return node.lastChild && needsToBorrowParentClosingTagStartMarker(node.lastChild)
+    ? ''
+    : [printClosingTagPrefix(node, options), printClosingTagStartMarker(node, options)];
+}
+
+export function printClosingTagEnd(node: LiquidHtmlNode, options: LiquidParserOptions) {
+  return (
+    node.next
+      ? needsToBorrowPrevClosingTagEndMarker(node.next)
+      : needsToBorrowLastChildClosingTagEndMarker(node.parentNode!)
+  )
+    ? ''
+    : [printClosingTagEndMarker(node, options), printClosingTagSuffix(node, options)];
+}
+
+function printClosingTagPrefix(node: LiquidHtmlNode, options: LiquidParserOptions) {
+  return needsToBorrowLastChildClosingTagEndMarker(node)
+    ? printClosingTagEndMarker(node.lastChild, options)
+    : '';
+}
+
+export function printClosingTagSuffix(node: LiquidHtmlNode, options: LiquidParserOptions) {
+  return needsToBorrowParentClosingTagStartMarker(node)
+    ? printClosingTagStartMarker(node.parentNode, options)
+    : needsToBorrowNextOpeningTagStartMarker(node)
+    ? printOpeningTagStartMarker(node.next)
+    : '';
+}
+
+export function printClosingTagStartMarker(
+  node: LiquidHtmlNode | undefined,
+  options: LiquidParserOptions,
+) {
+  if (!node) return '';
+  /* istanbul ignore next */
+  if (shouldNotPrintClosingTag(node, options)) {
+    return '';
+  }
+  switch (node.type) {
+    case NodeTypes.HtmlElement:
+      return `</${getCompoundName(node)}`;
+    case NodeTypes.HtmlRawNode:
+      return `</${node.name}`;
+    default:
+      return '';
+  }
+}
+
+export function printClosingTagEndMarker(
+  node: LiquidHtmlNode | undefined,
+  options: LiquidParserOptions,
+) {
+  if (!node) return '';
+  if (shouldNotPrintClosingTag(node, options) || isHtmlDanglingMarkerOpen(node)) {
+    return '';
+  }
+
+  switch (node.type) {
+    case NodeTypes.HtmlSelfClosingElement: {
+      // looks like it doesn't make sense because it should be part of
+      // the printOpeningTagEndMarker but this is handled somewhere else.
+      // This function is used to determine what to borrow so the "end" to
+      // borrow is actually the other end.
+      return '/>';
+    }
+
+    default:
+      return '>';
+  }
+}
+
+// Print the opening tag's `>`
 export function printOpeningTagEndMarker(node: LiquidHtmlNode | undefined) {
   if (!node) return '';
   switch (node.type) {
-    // case 'ieConditionalComment':
-    //   return ']>';
     case NodeTypes.HtmlComment:
       return '-->';
     case NodeTypes.HtmlSelfClosingElement:
     case NodeTypes.HtmlVoidElement:
-      return '';
+      return ''; // the `>` is printed by the printClosingTagEndMarker for self closing things
     case NodeTypes.HtmlElement:
-    case NodeTypes.HtmlDanglingMarkerOpen:
     case NodeTypes.HtmlDanglingMarkerClose:
+    // TODO why is this one not with the other group?
     case NodeTypes.HtmlRawNode:
       return '>';
     default:
@@ -451,30 +412,18 @@ export function printOpeningTagEndMarker(node: LiquidHtmlNode | undefined) {
 }
 
 export function getNodeContent(
-  node: Extract<
-    HtmlNode,
-    { blockStartPosition: Position; blockEndPosition: Position }
-  >,
+  node: Extract<HtmlNode, { blockStartPosition: Position; blockEndPosition: Position }>,
   options: LiquidParserOptions,
 ) {
   let start = node.blockStartPosition.end;
-  if (
-    node.firstChild &&
-    needsToBorrowParentOpeningTagEndMarker(node.firstChild)
-  ) {
+  if (node.firstChild && needsToBorrowParentOpeningTagEndMarker(node.firstChild)) {
     start -= printOpeningTagEndMarker(node).length;
   }
 
   let end = node.blockEndPosition.start;
-  if (
-    node.lastChild &&
-    needsToBorrowParentClosingTagStartMarker(node.lastChild)
-  ) {
+  if (node.lastChild && needsToBorrowParentClosingTagStartMarker(node.lastChild)) {
     end += printClosingTagStartMarker(node, options).length;
-  } else if (
-    node.lastChild &&
-    needsToBorrowLastChildClosingTagEndMarker(node)
-  ) {
+  } else if (node.lastChild && needsToBorrowLastChildClosingTagEndMarker(node)) {
     end -= printClosingTagEndMarker(node.lastChild, options).length;
   }
 
@@ -482,11 +431,7 @@ export function getNodeContent(
 }
 
 function getCompoundName(
-  node:
-    | HtmlElement
-    | HtmlSelfClosingElement
-    | HtmlDanglingMarkerOpen
-    | HtmlDanglingMarkerClose,
+  node: HtmlElement | HtmlSelfClosingElement | HtmlDanglingMarkerClose,
 ): string {
   return node.name
     .map((part) => {

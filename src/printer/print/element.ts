@@ -1,11 +1,8 @@
 'use strict';
 
 import { doc, Doc } from 'prettier';
-import {
-  shouldPreserveContent,
-  forceBreakContent,
-  hasNoCloseMarker,
-} from '~/printer/utils';
+import { NodeTypes } from '@shopify/liquid-html-parser';
+import { shouldPreserveContent, forceBreakContent, hasNoChildren } from '../utils';
 import {
   printOpeningTagPrefix,
   printOpeningTag,
@@ -14,29 +11,19 @@ import {
   needsToBorrowPrevClosingTagEndMarker,
   needsToBorrowLastChildClosingTagEndMarker,
   getNodeContent,
-} from '~/printer/print/tag';
-import { printChildren } from '~/printer/print/children';
+} from './tag';
+import { printChildren } from './children';
 import {
   AstPath,
-  NodeTypes,
   LiquidParserOptions,
   LiquidPrinter,
   HtmlNode,
   LiquidPrinterArgs,
   HtmlRawNode,
-} from '~/types';
-import { RawMarkupKinds } from '~/parser';
+} from '../../types';
 
 const {
-  builders: {
-    breakParent,
-    dedentToRoot,
-    group,
-    indent,
-    hardline,
-    line,
-    softline,
-  },
+  builders: { breakParent, dedentToRoot, group, indent, hardline, line, softline },
 } = doc;
 const { replaceEndOfLine } = doc.utils as any;
 
@@ -50,14 +37,9 @@ export function printRawElement(
   const attrGroupId = Symbol('element-attr-group-id');
   let body: Doc = [];
   const hasEmptyBody = node.body.value.trim() === '';
-  const shouldIndentBody = node.body.kind !== RawMarkupKinds.markdown;
 
   if (!hasEmptyBody) {
-    if (shouldIndentBody) {
-      body = [indent([hardline, path.call(print, 'body')]), hardline];
-    } else {
-      body = [dedentToRoot([hardline, path.call(print, 'body')]), hardline];
-    }
+    body = [path.call((p: any) => print(p), 'body')];
   }
 
   return group([
@@ -85,7 +67,7 @@ export function printElement(
     return printRawElement(path as AstPath<HtmlRawNode>, options, print, args);
   }
 
-  if (hasNoCloseMarker(node)) {
+  if (hasNoChildren(node)) {
     // TODO, broken for HtmlComment but this code path is not used (so far).
     return [
       group(printOpeningTag(path, options, print, attrGroupId), {
@@ -121,10 +103,7 @@ export function printElement(
     );
 
   const printLineBeforeChildren = () => {
-    if (
-      node.firstChild!.hasLeadingWhitespace &&
-      node.firstChild!.isLeadingWhitespaceSensitive
-    ) {
+    if (node.firstChild!.hasLeadingWhitespace && node.firstChild!.isLeadingWhitespaceSensitive) {
       return line;
     }
 
@@ -139,22 +118,20 @@ export function printElement(
   };
 
   const printLineAfterChildren = () => {
+    // does not have the closing tag
+    if (node.blockEndPosition.start === node.blockEndPosition.end) {
+      return '';
+    }
     const needsToBorrow = node.next
       ? needsToBorrowPrevClosingTagEndMarker(node.next)
       : needsToBorrowLastChildClosingTagEndMarker(node.parentNode!);
     if (needsToBorrow) {
-      if (
-        node.lastChild!.hasTrailingWhitespace &&
-        node.lastChild!.isTrailingWhitespaceSensitive
-      ) {
+      if (node.lastChild!.hasTrailingWhitespace && node.lastChild!.isTrailingWhitespaceSensitive) {
         return ' ';
       }
       return '';
     }
-    if (
-      node.lastChild!.hasTrailingWhitespace &&
-      node.lastChild!.isTrailingWhitespaceSensitive
-    ) {
+    if (node.lastChild!.hasTrailingWhitespace && node.lastChild!.isTrailingWhitespaceSensitive) {
       return line;
     }
     return softline;
@@ -162,7 +139,9 @@ export function printElement(
 
   if (node.children.length === 0) {
     return printTag(
-      node.hasDanglingWhitespace && node.isDanglingWhitespaceSensitive
+      node.hasDanglingWhitespace &&
+        node.isDanglingWhitespaceSensitive &&
+        node.blockEndPosition.end !== node.blockEndPosition.start
         ? line
         : '',
     );
