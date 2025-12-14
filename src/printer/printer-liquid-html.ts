@@ -1,21 +1,30 @@
+import {
+  getConditionalComment,
+  LiquidDocDescriptionNode,
+  LiquidDocExampleNode,
+  LiquidDocParamNode,
+  LiquidDocPromptNode,
+  NodeTypes,
+  Position,
+  RawMarkupKinds,
+} from '@shopify/liquid-html-parser';
 import { doc, Doc } from 'prettier';
 import type { Printer as Printer2 } from 'prettier';
 import type { Printer as Printer3 } from 'prettier3';
 import {
+  AstPath,
   AttrDoubleQuoted,
   AttrEmpty,
   AttrSingleQuoted,
   AttrUnquoted,
   DocumentNode,
   HtmlDanglingMarkerClose,
-  HtmlDanglingMarkerOpen,
   HtmlElement,
   HtmlRawNode,
   HtmlSelfClosingElement,
   HtmlVoidElement,
   LiquidAstPath,
   LiquidBranch,
-  LiquidDrop,
   LiquidExpression,
   LiquidHtmlNode,
   LiquidParserOptions,
@@ -23,40 +32,33 @@ import {
   LiquidPrinterArgs,
   LiquidRawTag,
   LiquidTag,
-  NodeTypes,
-  Position,
-  TextNode,
+  LiquidVariableOutput,
   nonTraversableProperties,
-  AstPath,
-} from '~/types';
-import { assertNever } from '~/utils';
+  RawMarkup,
+  TextNode,
+} from '../types';
+import { assertNever } from '../utils';
 
-import { preprocess } from '~/printer/print-preprocess';
-import {
-  bodyLines,
-  hasLineBreakInRange,
-  isEmpty,
-  isTextLikeNode,
-  reindent,
-} from '~/printer/utils';
-import { printElement } from '~/printer/print/element';
-import {
-  printClosingTagSuffix,
-  printOpeningTagPrefix,
-} from '~/printer/print/tag';
+import { embed2, embed3 } from './embed';
+import { preprocess } from './print-preprocess';
+import { printChildren } from './print/children';
+import { printElement } from './print/element';
 import {
   printLiquidBranch,
-  printLiquidDrop,
+  printLiquidDoc,
   printLiquidRawTag,
   printLiquidTag,
-} from '~/printer/print/liquid';
-import { printChildren } from '~/printer/print/children';
-import { embed2, embed3 } from '~/printer/embed';
-import { RawMarkupKinds } from '~/parser';
-import { getConditionalComment } from '~/parser/conditional-comment';
+  printLiquidVariableOutput,
+  printLiquidDocParam,
+  printLiquidDocExample,
+  printLiquidDocDescription,
+  printLiquidDocPrompt,
+} from './print/liquid';
+import { printClosingTagSuffix, printOpeningTagPrefix } from './print/tag';
+import { bodyLines, hasLineBreakInRange, isEmpty, isTextLikeNode, reindent } from './utils';
 
 const { builders, utils } = doc;
-const { fill, group, hardline, indent, join, line, softline } = builders;
+const { fill, group, hardline, dedentToRoot, indent, join, line, softline } = builders;
 
 const oppositeQuotes = {
   '"': "'",
@@ -72,22 +74,24 @@ function printAttributeName(
   node.name;
   return join(
     '',
-    (path as any).map((part: AstPath<string | LiquidDrop>) => {
+    (path as any).map((part: AstPath<string | LiquidVariableOutput>) => {
       const value = part.getValue();
       if (typeof value === 'string') {
         return value;
       } else {
-        // We want to force the LiquidDrop to be on one line to avoid weird
+        // We want to force the LiquidVariableOutput to be on one line to avoid weird
         // shenanigans
-        return utils.removeLines(print(part as AstPath<LiquidDrop>));
+        return utils.removeLines(print(part as AstPath<LiquidVariableOutput>));
       }
     }, 'name'),
   );
 }
 
-function printAttribute<
-  T extends Extract<LiquidHtmlNode, { attributePosition: Position }>,
->(path: AstPath<T>, options: LiquidParserOptions, print: LiquidPrinter): Doc {
+function printAttribute<T extends Extract<LiquidHtmlNode, { attributePosition: Position }>>(
+  path: AstPath<T>,
+  options: LiquidParserOptions,
+  print: LiquidPrinter,
+): Doc {
   const node = path.getValue();
   const attrGroupId = Symbol('attr-group-id');
   // What should be the rule here? Should it really be "paragraph"?
@@ -116,38 +120,21 @@ function printAttribute<
   // Anyway, for that reason ^, for now I'll just paste in what we have in
   // the source. It's too hard to get right.
 
-  const value = node.source.slice(
-    node.attributePosition.start,
-    node.attributePosition.end,
-  );
+  const value = node.source.slice(node.attributePosition.start, node.attributePosition.end);
   const preferredQuote = options.singleQuote ? `'` : `"`;
   const attributeValueContainsQuote = !!node.value.find(
-    (valueNode) =>
-      isTextLikeNode(valueNode) && valueNode.value.includes(preferredQuote),
+    (valueNode) => isTextLikeNode(valueNode) && valueNode.value.includes(preferredQuote),
   );
-  const quote = attributeValueContainsQuote
-    ? oppositeQuotes[preferredQuote]
-    : preferredQuote;
+  const quote = attributeValueContainsQuote ? oppositeQuotes[preferredQuote] : preferredQuote;
 
   return [
     printAttributeName(path, options, print),
     '=',
     quote,
-    hasLineBreakInRange(
-      node.source,
-      node.attributePosition.start,
-      node.attributePosition.end,
-    )
-      ? group(
-          [
-            indent([
-              softline,
-              join(hardline, reindent(bodyLines(value), true)),
-            ]),
-            softline,
-          ],
-          { id: attrGroupId },
-        )
+    hasLineBreakInRange(node.source, node.attributePosition.start, node.attributePosition.end)
+      ? group([indent([softline, join(hardline, reindent(bodyLines(value), true))]), softline], {
+          id: attrGroupId,
+        })
       : value,
     quote,
   ];
@@ -210,50 +197,23 @@ function printNode(
   const node = path.getValue();
   switch (node.type) {
     case NodeTypes.Document: {
-      return [
-        printChildren(path as AstPath<DocumentNode>, options, print, args),
-        hardline,
-      ];
+      return [printChildren(path as AstPath<DocumentNode>, options, print, args), hardline];
     }
 
     case NodeTypes.HtmlElement: {
       return printElement(path as AstPath<HtmlElement>, options, print, args);
     }
 
-    case NodeTypes.HtmlDanglingMarkerOpen: {
-      return printElement(
-        path as AstPath<HtmlDanglingMarkerOpen>,
-        options,
-        print,
-        args,
-      );
-    }
-
     case NodeTypes.HtmlDanglingMarkerClose: {
-      return printElement(
-        path as AstPath<HtmlDanglingMarkerClose>,
-        options,
-        print,
-        args,
-      );
+      return printElement(path as AstPath<HtmlDanglingMarkerClose>, options, print, args);
     }
 
     case NodeTypes.HtmlVoidElement: {
-      return printElement(
-        path as AstPath<HtmlVoidElement>,
-        options,
-        print,
-        args,
-      );
+      return printElement(path as AstPath<HtmlVoidElement>, options, print, args);
     }
 
     case NodeTypes.HtmlSelfClosingElement: {
-      return printElement(
-        path as AstPath<HtmlSelfClosingElement>,
-        options,
-        print,
-        args,
-      );
+      return printElement(path as AstPath<HtmlSelfClosingElement>, options, print, args);
     }
 
     case NodeTypes.HtmlRawNode: {
@@ -261,6 +221,10 @@ function printNode(
     }
 
     case NodeTypes.RawMarkup: {
+      if (node.parentNode?.name === 'doc') {
+        return printLiquidDoc(path as AstPath<RawMarkup>, options, print, args);
+      }
+
       const isRawMarkupIdentationSensitive = () => {
         switch (node.kind) {
           case RawMarkupKinds.typescript:
@@ -274,32 +238,38 @@ function printNode(
       };
 
       if (isRawMarkupIdentationSensitive()) {
-        return node.value;
+        return [node.value.trimEnd(), hardline];
       }
 
+      const parentNode = node.parentNode;
+      const shouldNotIndentBody =
+        parentNode &&
+        parentNode.type === NodeTypes.LiquidRawTag &&
+        parentNode.name === 'schema' &&
+        !options.indentSchema;
+      const shouldIndentBody = node.kind !== RawMarkupKinds.markdown && !shouldNotIndentBody;
       const lines = bodyLines(node.value);
-
-      const rawFirstLineIsntIndented = !!node.value
-        .split(/\r?\n/)[0]
-        ?.match(/\S/);
+      const rawFirstLineIsntIndented = !!node.value.split(/\r?\n/)[0]?.match(/\S/);
       const shouldSkipFirstLine = rawFirstLineIsntIndented;
 
-      return lines.length > 0 && lines.find((line) => line.trim() !== '')
-        ? join(hardline, reindent(lines, shouldSkipFirstLine))
-        : softline;
+      const body =
+        lines.length > 0 && lines.find((line) => line.trim() !== '')
+          ? join(hardline, reindent(lines, shouldSkipFirstLine))
+          : softline;
+
+      if (shouldIndentBody) {
+        return [indent([hardline, body]), hardline];
+      } else {
+        return [dedentToRoot([hardline, body]), hardline];
+      }
     }
 
-    case NodeTypes.LiquidDrop: {
-      return printLiquidDrop(path as AstPath<LiquidDrop>, options, print, args);
+    case NodeTypes.LiquidVariableOutput: {
+      return printLiquidVariableOutput(path as AstPath<LiquidVariableOutput>, options, print, args);
     }
 
     case NodeTypes.LiquidRawTag: {
-      return printLiquidRawTag(
-        path as AstPath<LiquidRawTag>,
-        options,
-        print,
-        args,
-      );
+      return printLiquidRawTag(path as AstPath<LiquidRawTag>, options, print, args);
     }
 
     case NodeTypes.LiquidTag: {
@@ -307,12 +277,7 @@ function printNode(
     }
 
     case NodeTypes.LiquidBranch: {
-      return printLiquidBranch(
-        path as AstPath<LiquidBranch>,
-        options,
-        print,
-        args,
-      );
+      return printLiquidBranch(path as AstPath<LiquidBranch>, options, print, args);
     }
 
     case NodeTypes.AttrEmpty: {
@@ -342,10 +307,7 @@ function printNode(
         const { startTag, body, endTag } = conditionalComment;
         return [
           startTag,
-          group([
-            indent([line, join(hardline, reindent(bodyLines(body), true))]),
-            line,
-          ]),
+          group([indent([line, join(hardline, reindent(bodyLines(body), true))]), line]),
           endTag,
         ];
       }
@@ -358,23 +320,23 @@ function printNode(
       }
       return [
         '<!--',
-        group([
-          indent([line, join(hardline, reindent(bodyLines(node.body), true))]),
-          line,
-        ]),
+        group([indent([line, join(hardline, reindent(bodyLines(node.body), true))]), line]),
         '-->',
       ];
     }
 
     case NodeTypes.AssignMarkup: {
-      return [node.name, ' = ', path.call(print, 'value')];
+      return [node.name, ' = ', path.call((p: any) => print(p), 'value')];
     }
 
     case NodeTypes.CycleMarkup: {
       const doc: Doc[] = [];
 
       if (node.groupName) {
-        doc.push(path.call(print, 'groupName'), ':');
+        doc.push(
+          path.call((p: any) => print(p), 'groupName'),
+          ':',
+        );
       }
 
       const whitespace = node.args.length > 1 ? line : ' ';
@@ -390,7 +352,7 @@ function printNode(
     }
 
     case NodeTypes.ForMarkup: {
-      const doc = [node.variableName, ' in ', path.call(print, 'collection')];
+      const doc = [node.variableName, ' in ', path.call((p: any) => print(p), 'collection')];
 
       if (node.reversed) {
         doc.push(line, 'reversed');
@@ -411,10 +373,10 @@ function printNode(
 
     case NodeTypes.PaginateMarkup: {
       const doc = [
-        path.call(print, 'collection'),
+        path.call((p: any) => print(p), 'collection'),
         line,
         'by ',
-        path.call(print, 'pageSize'),
+        path.call((p: any) => print(p), 'pageSize'),
       ];
 
       if (node.args.length > 0) {
@@ -431,15 +393,35 @@ function printNode(
       return doc;
     }
 
+    case NodeTypes.ContentForMarkup: {
+      const contentForType = path.call((p: any) => print(p), 'contentForType');
+      const doc: Doc = [contentForType];
+      if (node.args.length > 0) {
+        doc.push(
+          ',',
+          line,
+          join(
+            [',', line],
+            path.map((p) => print(p), 'args'),
+          ),
+        );
+      }
+
+      return doc;
+    }
+
     case NodeTypes.RenderMarkup: {
-      const snippet = path.call(print, 'snippet');
+      const snippet = path.call((p: any) => print(p), 'snippet');
       const doc: Doc = [snippet];
       if (node.variable) {
-        const whitespace = node.alias ? line : ' ';
-        doc.push(whitespace, path.call(print, 'variable'));
+        const whitespace = node.alias?.value ? line : ' ';
+        doc.push(
+          whitespace,
+          path.call((p: any) => print(p), 'variable'),
+        );
       }
-      if (node.alias) {
-        doc.push(' ', 'as', ' ', node.alias);
+      if (node.alias?.value) {
+        doc.push(' ', 'as', ' ', node.alias.value);
       }
       if (node.args.length > 0) {
         doc.push(
@@ -455,28 +437,32 @@ function printNode(
     }
 
     case NodeTypes.RenderVariableExpression: {
-      return [node.kind, ' ', path.call(print, 'name')];
+      return [node.kind, ' ', path.call((p: any) => print(p), 'name')];
+    }
+
+    case NodeTypes.RenderAliasExpression: {
+      return node.value;
     }
 
     case NodeTypes.LogicalExpression: {
       return [
-        path.call(print, 'left'),
+        path.call((p: any) => print(p), 'left'),
         line,
         node.relation,
         ' ',
-        path.call(print, 'right'),
+        path.call((p: any) => print(p), 'right'),
       ];
     }
 
     case NodeTypes.Comparison: {
       return group([
-        path.call(print, 'left'),
-        indent([line, node.comparator, ' ', path.call(print, 'right')]),
+        path.call((p: any) => print(p), 'left'),
+        indent([line, node.comparator, ' ', path.call((p: any) => print(p), 'right')]),
       ]);
     }
 
     case NodeTypes.LiquidVariable: {
-      const name = path.call(print, 'expression');
+      const name = path.call((p: any) => print(p), 'expression');
       let filters: Doc = '';
       if (node.filters.length > 0) {
         filters = [
@@ -495,14 +481,11 @@ function printNode(
 
       if (node.args.length > 0) {
         const printed = path.map((p) => print(p), 'args');
-        const shouldPrintFirstArgumentSameLine =
-          node.args[0].type !== NodeTypes.NamedArgument;
+        const shouldPrintFirstArgumentSameLine = node.args[0].type !== NodeTypes.NamedArgument;
 
         if (shouldPrintFirstArgumentSameLine) {
           const [firstDoc, ...rest] = printed;
-          const restDoc = isEmpty(rest)
-            ? ''
-            : indent([',', line, join([',', line], rest)]);
+          const restDoc = isEmpty(rest) ? '' : indent([',', line, join([',', line], rest)]);
           args = [': ', firstDoc, restDoc];
         } else {
           args = [':', indent([line, join([',', line], printed)])];
@@ -513,7 +496,7 @@ function printNode(
     }
 
     case NodeTypes.NamedArgument: {
-      return [node.name, ': ', path.call(print, 'value')];
+      return [node.name, ': ', path.call((p: any) => print(p), 'value')];
     }
 
     case NodeTypes.TextNode: {
@@ -524,12 +507,14 @@ function printNode(
       return ['---', hardline, node.body, '---'];
     }
 
+    case NodeTypes.BooleanExpression: {
+      return path.call((p: any) => print(p), 'condition');
+    }
+
     case NodeTypes.String: {
       const preferredQuote = options.liquidSingleQuote ? `'` : `"`;
       const valueHasQuotes = node.value.includes(preferredQuote);
-      const quote = valueHasQuotes
-        ? oppositeQuotes[preferredQuote]
-        : preferredQuote;
+      const quote = valueHasQuotes ? oppositeQuotes[preferredQuote] : preferredQuote;
       return [quote, node.value, quote];
     }
 
@@ -570,9 +555,9 @@ function printNode(
           case NodeTypes.String: {
             const value = lookup.value;
             // We prefer direct access
-            // (for everything but stuff with dashes)
+            // (for everything but stuff with dashes and stuff that starts with a number)
             const isGlobalStringLookup = index === 0 && !node.name;
-            if (!isGlobalStringLookup && /^[a-z0-9_]+\??$/i.test(value)) {
+            if (!isGlobalStringLookup && /^\D/.test(value) && /^[a-z0-9_]+\??$/i.test(value)) {
               return ['.', value];
             }
             return ['[', print(lookupPath), ']'];
@@ -583,6 +568,27 @@ function printNode(
         }
       }, 'lookups');
       return [...doc, ...lookups];
+    }
+
+    case NodeTypes.LiquidDocParamNode: {
+      return printLiquidDocParam(path as AstPath<LiquidDocParamNode>, options, print, args);
+    }
+
+    case NodeTypes.LiquidDocExampleNode: {
+      return printLiquidDocExample(path as AstPath<LiquidDocExampleNode>, options, print, args);
+    }
+
+    case NodeTypes.LiquidDocDescriptionNode: {
+      return printLiquidDocDescription(
+        path as AstPath<LiquidDocDescriptionNode>,
+        options,
+        print,
+        args,
+      );
+    }
+
+    case NodeTypes.LiquidDocPromptNode: {
+      return printLiquidDocPrompt(path as AstPath<LiquidDocPromptNode>, options, print, args);
     }
 
     default: {
@@ -596,11 +602,13 @@ export const printerLiquidHtml2: Printer2<LiquidHtmlNode> & {
 } & { getVisitorKeys: any } = {
   print: printNode as any,
   embed: embed2,
-  preprocess,
+  preprocess: preprocess as any,
   getVisitorKeys(node: any, nonTraversableKeys: Set<string>) {
     return Object.keys(node).filter(
       (key) =>
-        !nonTraversableKeys.has(key) && !nonTraversableProperties.has(key),
+        !nonTraversableKeys.has(key) &&
+        !nonTraversableProperties.has(key) &&
+        hasOrIsNode(node, key as keyof LiquidHtmlNode),
     );
   },
 };
@@ -610,11 +618,24 @@ export const printerLiquidHtml3: Printer3<LiquidHtmlNode> & {
 } & { getVisitorKeys: any } = {
   print: printNode as any,
   embed: embed3,
-  preprocess,
-  getVisitorKeys(node: any, nonTraversableKeys: Set<string>) {
+  preprocess: preprocess as any,
+  getVisitorKeys(node: LiquidHtmlNode, nonTraversableKeys: Set<string>) {
     return Object.keys(node).filter(
       (key) =>
-        !nonTraversableKeys.has(key) && !nonTraversableProperties.has(key),
+        !nonTraversableKeys.has(key) &&
+        !nonTraversableProperties.has(key) &&
+        hasOrIsNode(node, key as keyof LiquidHtmlNode),
     );
   },
 };
+
+function hasOrIsNode<N extends LiquidHtmlNode, K extends keyof N>(node: N, key: K) {
+  const v = node[key];
+  // this works because there's no ()[] type that is string | Node, it only
+  // happens for singular nodes such as name: string | LiquidDrop, etc.
+  return Array.isArray(v) || isNode(v);
+}
+
+function isNode(x: unknown): x is LiquidHtmlNode {
+  return x !== null && typeof x === 'object' && 'type' in x && typeof x.type === 'string';
+}

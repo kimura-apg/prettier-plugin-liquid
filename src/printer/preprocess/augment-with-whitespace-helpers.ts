@@ -1,11 +1,17 @@
 // A lot in here is adapted from prettier/prettier.
 
-import { HtmlNodeTypes, LiquidNodeTypes, NodeTypes, WithFamily } from '~/types';
+import {
+  HtmlNodeTypes,
+  LiquidNodeTypes,
+  NodeTypes,
+  isBranchedTag,
+} from '@shopify/liquid-html-parser';
+import { HtmlElement, WithFamily } from '../../types';
 import {
   CSS_WHITE_SPACE_DEFAULT,
   CSS_WHITE_SPACE_LIQUID_TAGS,
   CSS_WHITE_SPACE_TAGS,
-} from '~/constants.evaluate';
+} from '../../constants.evaluate';
 import {
   Augment,
   AugmentedNode,
@@ -13,25 +19,13 @@ import {
   WithParent,
   WithSiblings,
   WithWhitespaceHelpers,
-} from '~/types';
-import { isBranchedTag } from '~/parser';
-import {
-  isAttributeNode,
-  isPreLikeNode,
-  isScriptLikeTag,
-  isWhitespace,
-} from '~/printer/utils';
+} from '../../types';
+import { isAttributeNode, isPreLikeNode, isScriptLikeTag, isWhitespace } from '../utils';
 
-type RequiredAugmentations = WithParent &
-  WithSiblings &
-  WithFamily &
-  WithCssProperties;
+type RequiredAugmentations = WithParent & WithSiblings & WithFamily & WithCssProperties;
 type AugmentedAstNode = AugmentedNode<RequiredAugmentations>;
 
-export const augmentWithWhitespaceHelpers: Augment<RequiredAugmentations> = (
-  _options,
-  node,
-) => {
+export const augmentWithWhitespaceHelpers: Augment<RequiredAugmentations> = (_options, node) => {
   if (node.cssDisplay === 'should not be relevant') {
     return;
   }
@@ -111,9 +105,7 @@ function isIndentationSensitiveNode(node: AugmentedAstNode) {
  * rendered output.
  * <div attr-{{ hi }}
  */
-function isLeadingWhitespaceSensitiveNode(
-  node: AugmentedAstNode | undefined,
-): boolean {
+function isLeadingWhitespaceSensitiveNode(node: AugmentedAstNode | undefined): boolean {
   if (!node) {
     return false;
   }
@@ -124,17 +116,12 @@ function isLeadingWhitespaceSensitiveNode(
     const isParentInnerRightSensitive = isInnerLeftSpaceSensitiveCssDisplay(
       node.parentNode!.cssDisplay,
     );
-    const isFirstChildLeadingSensitive = isLeadingWhitespaceSensitiveNode(
-      node.firstChild,
-    );
+    const isFirstChildLeadingSensitive = isLeadingWhitespaceSensitiveNode(node.firstChild);
 
     // {% if %}<emptythis>{% endif %}
     // {% if %}this{% endif %}
     if (isDefaultBranch) {
-      return (
-        isParentInnerRightSensitive &&
-        (!hasNoChildren || isFirstChildLeadingSensitive)
-      );
+      return isParentInnerRightSensitive && (!hasNoChildren || isFirstChildLeadingSensitive);
     }
 
     // {% if %}{% <elseasthis> %}anything{% endif %}
@@ -145,7 +132,7 @@ function isLeadingWhitespaceSensitiveNode(
   if (
     node.parentNode &&
     isAttributeNode(node.parentNode) &&
-    node.type === NodeTypes.LiquidDrop
+    node.type === NodeTypes.LiquidVariableOutput
   ) {
     return true;
   }
@@ -203,10 +190,7 @@ function isLeadingWhitespaceSensitiveNode(
   //
   // example:
   //   - <p><div>hello</div> this</p>
-  if (
-    node.prev &&
-    !isOuterRightWhitespaceSensitiveCssDisplay(node.prev.cssDisplay)
-  ) {
+  if (node.prev && !isOuterRightWhitespaceSensitiveCssDisplay(node.prev.cssDisplay)) {
     return false;
   }
 
@@ -252,20 +236,19 @@ function isTrailingWhitespaceSensitiveNode(node: AugmentedAstNode): boolean {
   if (node.type === NodeTypes.LiquidBranch) {
     const isLastBranch = node.parentNode && node.parentNode.lastChild === node;
     const hasNoLastChild = !node.lastChild;
+    const lastChild = node.lastChild;
     const isLastChildTrailingSensitive =
-      !!node.lastChild && isTrailingWhitespaceSensitiveNode(node.lastChild);
+      !!lastChild && isTrailingWhitespaceSensitiveNode(lastChild);
 
     // {% if %}{% elsif cond %}<emptythis>{% endif %}
     // {% if %}{% elsif cond %}this{% endif %}
     // {% if %}{% else %}<emptythis>{% endif %}
     // {% if %}{% else %}this{% endif %}
     if (isLastBranch) {
-      const isParentInnerRightSensitive =
-        isInnerRightWhitespaceSensitiveCssDisplay(node.parentNode!.cssDisplay);
-      return (
-        isParentInnerRightSensitive &&
-        (hasNoLastChild || isLastChildTrailingSensitive)
+      const isParentInnerRightSensitive = isInnerRightWhitespaceSensitiveCssDisplay(
+        node.parentNode!.cssDisplay,
       );
+      return isParentInnerRightSensitive && (hasNoLastChild || isLastChildTrailingSensitive);
     }
 
     // {% if %}<emptythis>{% endif %}
@@ -277,6 +260,22 @@ function isTrailingWhitespaceSensitiveNode(node: AugmentedAstNode): boolean {
     return hasNoLastChild || isLastChildTrailingSensitive;
   }
 
+  // {% if cond %}<this>{% endif %}
+  // {% if cond %}<this><a>{% endif %}
+  // {% if cond %}<this><div>{% endif %}
+  // {% if cond %}<this><div></div>{% endif %}
+  // {% if cond %}<this>{% render 'icon' %}{% endif %}
+  if (isHtmlElementWithoutCloseTag(node)) {
+    if (!node.lastChild) {
+      return isInnerLeftSpaceSensitiveCssDisplay(node.cssDisplay);
+    }
+
+    return (
+      createsInlineFormattingContext(node.cssDisplay) &&
+      isTrailingWhitespaceSensitiveNode(node.lastChild)
+    );
+  }
+
   // '{{ drop -}} text'
   if (isTrimmingOuterRight(node)) {
     return false;
@@ -286,7 +285,7 @@ function isTrailingWhitespaceSensitiveNode(node: AugmentedAstNode): boolean {
   if (
     node.parentNode &&
     isAttributeNode(node.parentNode) &&
-    node.type === NodeTypes.LiquidDrop
+    node.type === NodeTypes.LiquidVariableOutput
   ) {
     return true;
   }
@@ -335,7 +334,7 @@ function isTrailingWhitespaceSensitiveNode(node: AugmentedAstNode): boolean {
       node.parentNode.type === NodeTypes.Document ||
       isPreLikeNode(node) ||
       isScriptLikeTag(node.parentNode) ||
-      !isInnerRightWhitespaceSensitiveCssDisplay(node.parentNode.cssDisplay) ||
+      (!isHtmlElementWithoutCloseTag(node.parentNode) && !isInnerRightWhitespaceSensitiveCssDisplay(node.parentNode.cssDisplay)) ||
       isTrimmingInnerRight(node.parentNode) ||
       isAttributeNode(node as any)
     )
@@ -350,10 +349,7 @@ function isTrailingWhitespaceSensitiveNode(node: AugmentedAstNode): boolean {
   //
   // 'Hello' is not whitespace sensitive to the right because the next
   // element is a block and doesn't care about whitespace to its left.
-  if (
-    node.next &&
-    !isOuterLeftWhitespaceSensitiveCssDisplay(node.next.cssDisplay)
-  ) {
+  if (node.next && !isOuterLeftWhitespaceSensitiveCssDisplay(node.next.cssDisplay)) {
     return false;
   }
 
@@ -401,18 +397,14 @@ function hasDanglingWhitespace(node: AugmentedAstNode): boolean {
 function hasLeadingWhitespace(node: AugmentedAstNode): boolean {
   // Edge case for default branch.
   if (node.type === NodeTypes.LiquidBranch && !node.prev) {
-    return node.firstChild
-      ? hasLeadingWhitespace(node.firstChild)
-      : hasDanglingWhitespace(node);
+    return node.firstChild ? hasLeadingWhitespace(node.firstChild) : hasDanglingWhitespace(node);
   }
   return isWhitespace(node.source, node.position.start - 1);
 }
 
 function hasTrailingWhitespace(node: AugmentedAstNode): boolean {
-  if (node.type === NodeTypes.LiquidBranch) {
-    return node.lastChild
-      ? hasTrailingWhitespace(node.lastChild)
-      : hasDanglingWhitespace(node);
+  if (node.type === NodeTypes.LiquidBranch || isHtmlElementWithoutCloseTag(node)) {
+    return node.lastChild ? hasTrailingWhitespace(node.lastChild) : hasDanglingWhitespace(node);
   }
   return isWhitespace(node.source, node.position.end);
 }
@@ -421,23 +413,15 @@ function hasTrailingWhitespace(node: AugmentedAstNode): boolean {
 // We _do_ only want those with _children_ specifically here... do we?
 type ParentNode = Extract<AugmentedAstNode, { children?: AugmentedAstNode[] }>;
 
-type HtmlNode = Extract<
-  AugmentedAstNode,
-  { type: (typeof HtmlNodeTypes)[number] }
->;
+type HtmlNode = Extract<AugmentedAstNode, { type: (typeof HtmlNodeTypes)[number] }>;
 
 export function isHtmlNode(node: AugmentedAstNode): node is HtmlNode {
   return HtmlNodeTypes.includes(node.type as any);
 }
 
-type LiquidNode = Extract<
-  AugmentedAstNode,
-  { type: (typeof LiquidNodeTypes)[number] }
->;
+type LiquidNode = Extract<AugmentedAstNode, { type: (typeof LiquidNodeTypes)[number] }>;
 
-export function isLiquidNode(
-  node: AugmentedAstNode | undefined,
-): node is LiquidNode {
+export function isLiquidNode(node: AugmentedAstNode | undefined): node is LiquidNode {
   return !!node && LiquidNodeTypes.includes(node.type as any);
 }
 
@@ -445,9 +429,7 @@ export function isParentNode(node: AugmentedAstNode): node is ParentNode {
   return 'children' in node;
 }
 
-export function isTrimmingOuterRight(
-  node: AugmentedAstNode | undefined,
-): boolean {
+export function isTrimmingOuterRight(node: AugmentedAstNode | undefined): boolean {
   if (!node) return false;
   switch (node.type) {
     case NodeTypes.LiquidRawTag:
@@ -455,31 +437,27 @@ export function isTrimmingOuterRight(
       return (node.delimiterWhitespaceEnd ?? node.whitespaceEnd) === '-';
     case NodeTypes.LiquidBranch:
       return false;
-    case NodeTypes.LiquidDrop: // {{ foo -}}
+    case NodeTypes.LiquidVariableOutput: // {{ foo -}}
       return node.whitespaceEnd === '-';
     default:
       return false;
   }
 }
 
-export function isTrimmingOuterLeft(
-  node: AugmentedAstNode | undefined,
-): boolean {
+export function isTrimmingOuterLeft(node: AugmentedAstNode | undefined): boolean {
   if (!node) return false;
   switch (node.type) {
     case NodeTypes.LiquidRawTag:
     case NodeTypes.LiquidTag: // {%- if a %}{% endif %}, {%- assign x = 1 %}
     case NodeTypes.LiquidBranch: // {%- else %}
-    case NodeTypes.LiquidDrop: // {{- 'val' }}
+    case NodeTypes.LiquidVariableOutput: // {{- 'val' }}
       return node.whitespaceStart === '-';
     default:
       return false;
   }
 }
 
-export function isTrimmingInnerLeft(
-  node: AugmentedAstNode | undefined,
-): boolean {
+export function isTrimmingInnerLeft(node: AugmentedAstNode | undefined): boolean {
   if (!node) return false;
   switch (node.type) {
     case NodeTypes.LiquidRawTag:
@@ -499,15 +477,13 @@ export function isTrimmingInnerLeft(
 
       // Otherwise gets it from the delimiter. e.g. {% else -%}
       return node.whitespaceEnd === '-';
-    case NodeTypes.LiquidDrop:
+    case NodeTypes.LiquidVariableOutput:
     default:
       return false;
   }
 }
 
-export function isTrimmingInnerRight(
-  node: AugmentedAstNode | undefined,
-): boolean {
+export function isTrimmingInnerRight(node: AugmentedAstNode | undefined): boolean {
   if (!node) return false;
   switch (node.type) {
     case NodeTypes.LiquidRawTag:
@@ -527,18 +503,20 @@ export function isTrimmingInnerRight(
 
       // Otherwise gets it from the next branch
       return isTrimmingOuterLeft(node.next);
-    case NodeTypes.LiquidDrop:
+    case NodeTypes.LiquidVariableOutput:
     default:
       return false;
   }
 }
 
-function isBlockLikeCssDisplay(cssDisplay: string) {
+function createsInlineFormattingContext(cssDisplay: string) {
   return (
-    cssDisplay === 'block' ||
-    cssDisplay === 'list-item' ||
-    cssDisplay.startsWith('table')
+    isBlockLikeCssDisplay(cssDisplay) || cssDisplay === 'inline' || cssDisplay === 'inline-block'
   );
+}
+
+function isBlockLikeCssDisplay(cssDisplay: string) {
+  return cssDisplay === 'block' || cssDisplay === 'list-item' || cssDisplay.startsWith('table');
 }
 
 function isInnerLeftSpaceSensitiveCssDisplay(cssDisplay: string) {
@@ -563,13 +541,19 @@ function isDanglingSpaceSensitiveCssDisplay(cssDisplay: string) {
 
 function getNodeCssStyleWhiteSpace(node: AugmentedAstNode) {
   return (
-    (isHtmlNode(node) &&
-      typeof node.name === 'string' &&
-      CSS_WHITE_SPACE_TAGS[node.name]) ||
+    (isHtmlNode(node) && typeof node.name === 'string' && CSS_WHITE_SPACE_TAGS[node.name]) ||
     (isLiquidNode(node) &&
       'name' in node &&
       typeof node.name === 'string' &&
       CSS_WHITE_SPACE_LIQUID_TAGS[node.name]) ||
     CSS_WHITE_SPACE_DEFAULT
+  );
+}
+
+function isHtmlElementWithoutCloseTag(node: AugmentedAstNode | undefined): node is HtmlElement {
+  return (
+    !!node &&
+    node.type === NodeTypes.HtmlElement &&
+    node.blockEndPosition.start === node.blockEndPosition.end
   );
 }
